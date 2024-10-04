@@ -67,14 +67,61 @@ app.post("/profiles", async (req, res) => {
         profilesData.push({
           username: accountInfo.username,
           fullName: accountInfo.full_name,
+          isPrivate: accountInfo.is_private,
+          isVerified: accountInfo.is_verified,
+          profilePicUrl: accountInfo.profile_pic_url,
+          biography: accountInfo.biography,
+          externalUrl: accountInfo.external_url,
+          isBusiness: accountInfo.is_business,
+          accountType: accountInfo.account_type,
           followers: accountInfo.follower_count,
           following: accountInfo.following_count,
           posts: accountInfo.media_count,
+          isJoinedRecently: accountInfo.is_joined_recently,
+          businessCategory: accountInfo.category,
+          businessCategoryName: accountInfo.category_name,
+          businessContactMethod: accountInfo.business_contact_method,
+          publicPhoneNumber: accountInfo.public_phone_number,
+          publicEmail: accountInfo.public_email,
+          publicPhoneCountryCode: accountInfo.public_phone_country_code,
+          cityName: accountInfo.city_name,
+          zipCode: accountInfo.zip,
           feed: feedItems.map((item) => ({
+            id: item.id,
+            code: item.code,
+            takenAt: item.taken_at,
+            mediaType: item.media_type,
             caption: item.caption ? item.caption.text : "Sem legenda",
             likes: item.like_count,
             comments: item.comment_count,
+            viewCount: item.view_count || null,
+            isVideo: item.is_video,
+            location: item.location
+              ? {
+                  name: item.location.name,
+                  city: item.location.city,
+                  country: item.location.country,
+                }
+              : null,
+            tags: item.user_tags
+              ? item.user_tags.map((tag) => tag.user.username)
+              : [],
             link: `https://www.instagram.com/p/${item.code}/`,
+            mediaDetails: {
+              images: item.image_versions2
+                ? item.image_versions2.candidates
+                : [],
+              videos: item.video_versions || [],
+            },
+            carouselMedia: item.carousel_media
+              ? item.carousel_media.map((mediaItem) => ({
+                  mediaType: mediaItem.media_type,
+                  images: mediaItem.image_versions2
+                    ? mediaItem.image_versions2.candidates
+                    : [],
+                  videos: mediaItem.video_versions || [],
+                }))
+              : null,
           })),
         });
       } catch (error) {
