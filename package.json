@@ -1,0 +1,9 @@
+{
+  "dependencies": {
+    "body-parser": "^1.20.3",
+    "express": "^4.21.0",
+    "instagram-private-api": "^1.46.1",
+    "open": "^10.1.0",
+    "re2": "^1.21.4"
+  }
+}
