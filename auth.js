@@ -10,25 +10,7 @@ async function authenticate(deviceName, username, password) {
     return ig;
   } catch (error) {
     if (error.name === "IgCheckpointError") {
-      console.log("Checkpoint necessário. Tentando resolver o desafio...");
-
-      try {
-        // Tenta selecionar o método de verificação
-        const verificationMethod = await ig.challenge.selectVerifyMethod(
-          "email"
-        ); // ou 'phone' para SMS
-
-        if (verificationMethod && verificationMethod.status === "ok") {
-          const verificationCode = await promptUserForCode();
-          await ig.challenge.sendSecurityCode(verificationCode);
-          console.log("Desafio resolvido com sucesso!");
-          return ig;
-        }
-      } catch (verificationError) {
-        console.log(
-          "Método de verificação não disponível ou falhou. Aguardando autorização manual..."
-        );
-      }
+      console.log("Checkpoint necessário. Aguardando autorização manual...");
 
       await waitForUserToAuthorize(ig);
       return ig;
@@ -36,24 +18,6 @@ async function authenticate(deviceName, username, password) {
       throw new Error(error.message);
     }
   }
-}
-
-// Função para solicitar o código de verificação ao usuário
-async function promptUserForCode() {
-  return new Promise((resolve) => {
-    const readline = require("readline").createInterface({
-      input: process.stdin,
-      output: process.stdout,
-    });
-
-    readline.question(
-      "Por favor, insira o código de verificação recebido: ",
-      (code) => {
-        readline.close();
-        resolve(code.trim());
-      }
-    );
-  });
 }
 
 // Função para aguardar o usuário autorizar manualmente
@@ -66,7 +30,7 @@ async function waitForUserToAuthorize(ig) {
   while (!isResolved) {
     await new Promise((resolve) => setTimeout(resolve, 30000)); // Aguarda 30 segundos antes de verificar novamente
     try {
-      await ig.account.currentUser();
+      await ig.account.currentUser(); // Tenta verificar se a conta foi autorizada
       console.log("Autorização completa!");
       isResolved = true;
     } catch (error) {
