@@ -12,6 +12,7 @@ async function authenticate(deviceName, username, password) {
     if (error.name === "IgCheckpointError") {
       console.log("Checkpoint necessário. Aguardando autorização manual...");
 
+      // Aguardar indefinidamente até que o usuário autorize manualmente
       await waitForUserToAuthorize(ig);
       return ig;
     } else {
@@ -26,17 +27,16 @@ async function waitForUserToAuthorize(ig) {
     "Aguardando autorização manual... Complete o desafio no app ou em outro dispositivo permitido."
   );
 
-  let isResolved = false;
-  while (!isResolved) {
-    await new Promise((resolve) => setTimeout(resolve, 30000)); // Aguarda 30 segundos antes de verificar novamente
+  while (true) {
     try {
-      await ig.account.currentUser(); // Tenta verificar se a conta foi autorizada
+      await new Promise((resolve) => setTimeout(resolve, 30000)); // Espera 30 segundos antes de verificar novamente
+      await ig.account.currentUser();
       console.log("Autorização completa!");
-      isResolved = true;
+      break;
     } catch (error) {
       if (error.name !== "IgCheckpointError") {
-        throw new Error(
-          "Erro ao verificar autorização manual: " + error.message
+        console.log(
+          "Erro ao verificar autorização manual. Continuando a aguardar..."
         );
       }
     }
