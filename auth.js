@@ -1,6 +1,6 @@
 const { IgApiClient } = require("instagram-private-api");
 
-async function authenticate(deviceName, username, password) {
+async function authenticate(deviceName, username, password, retryCount = 0) {
   const ig = new IgApiClient();
   ig.state.generateDevice(deviceName);
 
@@ -11,21 +11,26 @@ async function authenticate(deviceName, username, password) {
   } catch (error) {
     if (error.name === "IgCheckpointError") {
       console.log("Checkpoint necessário. Aguardando autorização manual...");
-
       await waitForUserToAuthorize(ig);
-      return ig;
+      return ig; // Retorna o cliente autenticado após autorização manual
+    } else if (error.message.includes("login_required") && retryCount < 3) {
+      console.log(
+        `Tentativa de reautenticação (${retryCount + 1}) em 30 segundos...`
+      );
+      await new Promise((resolve) => setTimeout(resolve, 30000));
+      return authenticate(deviceName, username, password, retryCount + 1); // Reautentica com incremento do contador de tentativas
     } else {
       throw new Error(error.message);
     }
   }
 }
 
+// Função para aguardar o usuário autorizar manualmente
 async function waitForUserToAuthorize(ig) {
   console.log(
     "Aguardando autorização manual... Complete o desafio no app ou em outro dispositivo permitido."
   );
 
-  // Loop indefinido até que o usuário autorize
   while (true) {
     try {
       await new Promise((resolve) => setTimeout(resolve, 30000)); // Espera 30 segundos antes de verificar novamente
@@ -37,6 +42,9 @@ async function waitForUserToAuthorize(ig) {
         console.log(
           "Autorização ainda não concluída, continuando a aguardar..."
         );
+      } else if (error.message.includes("login_required")) {
+        console.log("Sessão inválida, reautenticando...");
+        break;
       } else {
         throw new Error(
           "Erro ao verificar autorização manual: " + error.message
