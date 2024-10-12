@@ -1,54 +1,79 @@
 const express = require("express");
-const { authenticate } = require("../auth");
+const { ensureAuthenticated } = require("../auth");
+const { incrementAction } = require("../utils/actionManager");
 
 const router = express.Router();
 
 // Endpoint para buscar localizações por termo
-router.post("/search", async (req, res) => {
-  const { deviceName, username, password, query } = req.body;
+router.post("/search", ensureAuthenticated, async (req, res) => {
+  const { username, query } = req.body;
 
-  if (!deviceName || !username || !password || !query) {
+  if (!query) {
     return res.status(400).json({
       success: false,
-      message:
-        "Por favor, forneça deviceName, username, password e query (termo de localização).",
+      message: "Por favor, forneça um query (termo de localização).",
     });
   }
 
   try {
-    const ig = await authenticate(deviceName, username, password);
+    await incrementAction(username, "searches");
+    const ig = req.ig;
     const locations = await ig.fbsearch.places(query);
 
-    const locationData = locations.list.map((place) => ({
+    const locationData = locations.items.map((place) => ({
       id: place.location.pk,
       name: place.location.name,
-      address: place.location.address,
-      city: place.location.city,
+      address: place.location.address || "Sem endereço",
+      city: place.location.city || "Sem cidade",
       lat: place.location.lat,
       lng: place.location.lng,
+      short_name: place.location.short_name,
+      facebook_places_id: place.location.facebook_places_id,
+      external_source: place.location.external_source,
+      has_viewer_saved: place.location.has_viewer_saved,
     }));
 
-    res.json({ success: true, locations: locationData });
+    if (locationData.length === 0) {
+      return res.status(404).json({
+        success: false,
+        message: "Nenhuma localização encontrada com o termo de busca.",
+      });
+    }
+
+    return res.json({ success: true, locations: locationData });
   } catch (error) {
-    res.status(500).json({ success: false, error: error.message });
+    if (!res.headersSent) {
+      return res.status(500).json({ success: false, error: error.message });
+    }
   }
 });
 
-// Endpoint para obter posts de uma localização específica usando o locationId
-router.post("/posts", async (req, res) => {
-  const { deviceName, username, password, locationId } = req.body;
+// posts de uma localização específica usando termo
+router.post("/posts", ensureAuthenticated, async (req, res) => {
+  const { username, query } = req.body;
 
-  if (!deviceName || !username || !password || !locationId) {
+  if (!query) {
     return res.status(400).json({
       success: false,
-      message:
-        "Por favor, forneça deviceName, username, password e locationId.",
+      message: "Por favor, forneça o termo de localização (query).",
     });
   }
 
   try {
-    const ig = await authenticate(deviceName, username, password);
-    const locationFeed = ig.feed.location(locationId);
+    await incrementAction(username, "posts");
+    const ig = req.ig;
+
+    const locations = await ig.fbsearch.places(query);
+
+    if (!locations.items.length) {
+      return res.status(404).json({
+        success: false,
+        message: "Nenhuma localização encontrada com o termo de busca.",
+      });
+    }
+
+    const locationId = locations.items[0].location.pk;
+    const locationFeed = ig.feed.location(locationId, "recent");
     const posts = await locationFeed.items();
 
     const postsData = posts.map((post) => ({
@@ -68,9 +93,67 @@ router.post("/posts", async (req, res) => {
       },
     }));
 
-    res.json({ success: true, posts: postsData });
+    return res.json({ success: true, posts: postsData });
   } catch (error) {
-    res.status(500).json({ success: false, error: error.message });
+    if (!res.headersSent) {
+      return res.status(500).json({ success: false, error: error.message });
+    }
+  }
+});
+
+// stories de uma localização específica
+router.post("/stories", ensureAuthenticated, async (req, res) => {
+  const { username, query } = req.body;
+
+  if (!query) {
+    return res.status(400).json({
+      success: false,
+      message: "Por favor, forneça o termo de localização (query).",
+    });
+  }
+
+  try {
+    await incrementAction(username, "stories_views");
+    const ig = req.ig;
+
+    const locations = await ig.fbsearch.places(query);
+
+    if (!locations.items.length) {
+      return res.status(404).json({
+        success: false,
+        message: "Nenhuma localização encontrada com o termo de busca.",
+      });
+    }
+
+    const locationId = locations.items[0].location.pk;
+
+    const storyFeed = await ig.location.story(locationId);
+
+    if (!storyFeed.reel || !storyFeed.reel.items) {
+      return res.status(404).json({
+        success: false,
+        message: "Nenhum story encontrado para essa localização.",
+      });
+    }
+
+    const storiesData = storyFeed.reel.items.map((story) => ({
+      id: story.id,
+      mediaType: story.media_type,
+      takenAt: new Date(story.taken_at * 1000).toISOString(),
+      viewCount: story.view_count || 0,
+      images: story.image_versions2 ? story.image_versions2.candidates : [],
+      videos: story.video_versions || [],
+      user: {
+        username: story.user.username,
+        fullName: story.user.full_name,
+      },
+    }));
+
+    return res.json({ success: true, stories: storiesData });
+  } catch (error) {
+    if (!res.headersSent) {
+      return res.status(500).json({ success: false, error: error.message });
+    }
   }
 });
 

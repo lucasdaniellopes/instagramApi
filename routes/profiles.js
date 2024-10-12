@@ -1,9 +1,11 @@
 const express = require("express");
-const { authenticate } = require("../auth");
+const { ensureAuthenticated } = require("../auth");
+const { incrementAction } = require("../utils/actionManager");
 
 const router = express.Router();
 
-router.post("/", async (req, res) => {
+// Busca exata de usuários
+router.post("/", ensureAuthenticated, async (req, res) => {
   const { deviceName, username, password, targetUsernames } = req.body;
 
   if (
@@ -19,23 +21,37 @@ router.post("/", async (req, res) => {
     });
   }
 
-  try {
-    const ig = await authenticate(deviceName, username, password);
-    const profilesData = [];
+  if (targetUsernames.length === 0) {
+    return res.status(400).json({
+      success: false,
+      message: "Nenhum perfil disponível.",
+    });
+  }
 
+  try {
+    const ig = req.ig;
+    if (!ig) {
+      return res.status(500).json({
+        success: false,
+        message: "Falha ao obter o cliente IG. Tente autenticar novamente.",
+      });
+    }
+
+    const profilesData = [];
     for (const targetUsername of targetUsernames) {
       try {
         const userInfo = await ig.user.searchExact(targetUsername);
         const accountInfo = await ig.user.info(userInfo.pk);
-
         const userFeed = ig.feed.user(accountInfo.pk);
         const feedItems = [];
+
         do {
           const items = await userFeed.items();
           feedItems.push(...items);
         } while (userFeed.isMoreAvailable());
 
         profilesData.push({
+          id: accountInfo.pk,
           username: accountInfo.username,
           fullName: accountInfo.full_name,
           isPrivate: accountInfo.is_private,
@@ -48,53 +64,14 @@ router.post("/", async (req, res) => {
           followers: accountInfo.follower_count,
           following: accountInfo.following_count,
           posts: accountInfo.media_count,
-          isJoinedRecently: accountInfo.is_joined_recently,
-          businessCategory: accountInfo.category,
-          businessCategoryName: accountInfo.category_name,
-          businessContactMethod: accountInfo.business_contact_method,
-          publicPhoneNumber: accountInfo.public_phone_number,
-          publicEmail: accountInfo.public_email,
-          publicPhoneCountryCode: accountInfo.public_phone_country_code,
-          cityName: accountInfo.city_name,
-          zipCode: accountInfo.zip,
           feed: feedItems.slice(0, 3).map((item) => ({
             id: item.id,
             code: item.code,
-            takenAt: formatTimeStamp(item.taken_at),
-            mediaType: item.media_type,
             caption: item.caption ? item.caption.text : "Sem legenda",
-            likes: item.like_count,
-            comments: item.comment_count,
-            viewCount: item.view_count || null,
-            isVideo: item.is_video,
-            location: item.location
-              ? {
-                  name: item.location.name,
-                  city: item.location.city,
-                  country: item.location.country,
-                }
-              : null,
-            tags: item.user_tags
-              ? item.user_tags.map((tag) => tag.user.username)
-              : [],
-            link: `https://www.instagram.com/p/${item.code}/`,
-            mediaDetails: {
-              images: item.image_versions2
-                ? item.image_versions2.candidates
-                : [],
-              videos: item.video_versions || [],
-            },
-            carouselMedia: item.carousel_media
-              ? item.carousel_media.map((mediaItem) => ({
-                  mediaType: mediaItem.media_type,
-                  images: mediaItem.image_versions2
-                    ? mediaItem.image_versions2.candidates
-                    : [],
-                  videos: mediaItem.video_versions || [],
-                }))
-              : null,
           })),
         });
+
+        await incrementAction(username, "profile_search");
       } catch (error) {
         profilesData.push({
           username: targetUsername,
@@ -103,20 +80,53 @@ router.post("/", async (req, res) => {
       }
     }
 
-    res.json({ success: true, profilesData });
+    return res.json({ success: true, profilesData });
   } catch (error) {
-    res.status(500).json({ success: false, error: error.message });
+    if (!res.headersSent) {
+      return res.status(500).json({ success: false, error: error.message });
+    }
   }
 });
 
-function formatTimeStamp(timeStamp) {
-  const date = new Date(timeStamp * 1000);
-  const formattedDate = `${date.getDate().toString().padStart(2, "0")}/${(
-    date.getMonth() + 1
-  )
-    .toString()
-    .padStart(2, "0")}/${date.getFullYear()}`;
-  return formattedDate;
-}
+// Busca ampla de usuários
+router.post("/searchUsers", ensureAuthenticated, async (req, res) => {
+  const { deviceName, username, password, query } = req.body;
+
+  if (!deviceName || !username || !password || !query) {
+    return res.status(400).json({
+      success: false,
+      message:
+        "Por favor, forneça deviceName, username, password e um termo de pesquisa.",
+    });
+  }
+
+  try {
+    const ig = req.ig;
+    const searchResults = await ig.user.search(query);
+
+    const usersData = searchResults.users.map((user) => ({
+      pk: user.pk,
+      username: user.username,
+      fullName: user.full_name,
+      isPrivate: user.is_private,
+      profilePicUrl: user.profile_pic_url,
+    }));
+
+    if (usersData.length === 0) {
+      return res.status(404).json({
+        success: false,
+        message: "Nenhum usuário encontrado com o termo de pesquisa.",
+      });
+    }
+
+    await incrementAction(username, "user_search");
+
+    return res.json({ success: true, users: usersData });
+  } catch (error) {
+    if (!res.headersSent) {
+      return res.status(500).json({ success: false, error: error.message });
+    }
+  }
+});
 
 module.exports = router;

@@ -1,58 +1,24 @@
 const express = require("express");
-const { authenticate } = require("../auth");
+const { ensureAuthenticated } = require("../auth");
+const { incrementAction } = require("../utils/actionManager");
 
 const router = express.Router();
 
-// Endpoint para buscar hashtags
-router.post("/search", async (req, res) => {
-  const { deviceName, username, password, query } = req.body;
-
-  if (!deviceName || !username || !password || !query) {
-    return res.status(400).json({
-      success: false,
-      message:
-        "Por favor, forneça deviceName, username, password e query (termo de busca da hashtag).",
-    });
-  }
-
-  try {
-    const ig = await authenticate(deviceName, username, password);
-    const hashtags = await ig.tag.search(query);
-
-    if (!hashtags.results.length) {
-      return res.status(404).json({
-        success: false,
-        message: "Nenhuma hashtag encontrada para o termo de busca fornecido.",
-      });
-    }
-
-    const hashtagData = hashtags.results.map((hashtag) => ({
-      id: hashtag.id,
-      name: hashtag.name,
-      mediaCount: hashtag.media_count,
-    }));
-
-    res.json({ success: true, hashtags: hashtagData });
-  } catch (error) {
-    res.status(500).json({ success: false, error: error.message });
-  }
-});
-
 // Endpoint para obter posts de uma hashtag específica usando tag.section via POST
-router.post("/posts", async (req, res) => {
-  const { deviceName, username, password, hashtag } = req.body;
+router.post("/posts", ensureAuthenticated, async (req, res) => {
+  const { username, hashtag } = req.body;
 
-  if (!deviceName || !username || !password || !hashtag) {
+  if (!hashtag) {
     return res.status(400).json({
       success: false,
-      message: "Por favor, forneça deviceName, username, password e hashtag.",
+      message: "Por favor, forneça o hashtag.",
     });
   }
 
   try {
-    const ig = await authenticate(deviceName, username, password);
+    const ig = req.ig;
+    await incrementAction(username, "posts");
 
-    // Buscar o ID da hashtag
     const hashtagSearch = await ig.tag.search(hashtag);
     const tagResult = hashtagSearch.results.find(
       (h) => h.name === hashtag.toLowerCase()
@@ -65,13 +31,12 @@ router.post("/posts", async (req, res) => {
       });
     }
 
-    // Realiza a requisição POST diretamente ao endpoint de section com o ID da hashtag
     const sectionData = await ig.request.send({
       url: `/api/v1/tags/${tagResult.id}/sections/`,
       method: "POST",
       qs: {
         timezone_offset: -10800,
-        tab: "recent", // Alternativamente, 'recent'
+        tab: "recent",
         count: 30,
       },
     });
@@ -97,9 +62,111 @@ router.post("/posts", async (req, res) => {
       }))
     );
 
-    res.json({ success: true, posts: postsData });
+    return res.json({ success: true, posts: postsData });
   } catch (error) {
-    res.status(500).json({ success: false, error: error.message });
+    if (!res.headersSent) {
+      return res.status(500).json({ success: false, error: error.message });
+    }
+  }
+});
+
+// Endpoint para buscar hashtags
+router.post("/search", ensureAuthenticated, async (req, res) => {
+  const { username, query } = req.body;
+
+  if (!query) {
+    return res.status(400).json({
+      success: false,
+      message: "Por favor, forneça o termo de busca da hashtag.",
+    });
+  }
+
+  try {
+    const ig = req.ig;
+    await incrementAction(username, "searches");
+
+    const hashtags = await ig.tag.search(query);
+
+    if (!hashtags.results.length) {
+      return res.status(404).json({
+        success: false,
+        message: "Nenhuma hashtag encontrada para o termo de busca fornecido.",
+      });
+    }
+
+    const hashtagData = hashtags.results.map((hashtag) => ({
+      id: hashtag.id,
+      name: hashtag.name,
+      mediaCount: hashtag.media_count,
+    }));
+
+    return res.json({ success: true, hashtags: hashtagData });
+  } catch (error) {
+    if (!res.headersSent) {
+      return res.status(500).json({ success: false, error: error.message });
+    }
+  }
+});
+
+// Endpoint para obter informações de uma hashtag específica
+router.post("/info", ensureAuthenticated, async (req, res) => {
+  const { username, hashtag } = req.body;
+
+  if (!hashtag) {
+    return res.status(400).json({
+      success: false,
+      message: "Por favor, forneça o hashtag.",
+    });
+  }
+
+  try {
+    const ig = req.ig;
+    await incrementAction(username, "hashtag_info");
+
+    // Obter informações da hashtag
+    const tagInfo = await ig.tag.info(hashtag);
+
+    // Usar o feed da hashtag para obter posts recentes
+    const tagFeed = ig.feed.tag(hashtag);
+    const posts = await tagFeed.items();
+
+    if (!posts.length) {
+      return res.status(404).json({
+        success: false,
+        message: "Nenhuma postagem encontrada para essa hashtag.",
+      });
+    }
+
+    // Retorna as primeiras 10 postagens da hashtag
+    const hashtagPosts = posts.slice(0, 10).map((post) => ({
+      id: post.id,
+      caption: post.caption ? post.caption.text : "Sem legenda",
+      mediaType: post.media_type,
+      likeCount: post.like_count,
+      commentCount: post.comment_count,
+      takenAt: new Date(post.taken_at * 1000).toISOString(),
+      user: {
+        username: post.user.username,
+        fullName: post.user.full_name,
+      },
+    }));
+
+    // Retorna informações da hashtag e posts recentes
+    return res.json({
+      success: true,
+      hashtagInfo: {
+        id: tagInfo.id,
+        name: tagInfo.name,
+        mediaCount: tagInfo.media_count,
+        following: tagInfo.following,
+        isTopMediaOnly: tagInfo.is_top_media_only,
+      },
+      posts: hashtagPosts,
+    });
+  } catch (error) {
+    if (!res.headersSent) {
+      return res.status(500).json({ success: false, error: error.message });
+    }
   }
 });
 
